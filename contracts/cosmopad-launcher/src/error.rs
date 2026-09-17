@@ -16,4 +16,8 @@ pub enum ContractError {
     InvalidInput(String),
     #[error("slippage limit was not met")]
     SlippageLimitNotMet,
+    #[error("not implemented: {0}")]
+    NotImplemented(String),
+    #[error("storage error: {0}")]
+    Storage(#[from] cosmwasm_std::StdError),
 }
