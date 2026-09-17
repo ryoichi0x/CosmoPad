@@ -1,9 +1,15 @@
-use cosmwasm_std::{entry_point, to_json_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult};
+use cosmwasm_std::{
+    entry_point, to_json_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdError,
+    StdResult, Uint128,
+};
 
 use crate::{
     error::ContractError,
     math::{calculate_buy, calculate_sell, enforce_minimum, initial_price},
-    msg::{ConfigResponse, CurveStateResponse, EstimateResponse, ExecuteMsg, InstantiateMsg, QueryMsg},
+    msg::{
+        ConfigResponse, CurveStateResponse, EstimateResponse, ExecuteMsg, InstantiateMsg,
+        PriceResponse, QueryMsg,
+    },
     state::{validate_launch_config, BondingCurveState, LaunchConfig, CONFIG, CURVE},
 };
 
@@ -34,7 +40,9 @@ pub fn instantiate(
     CONFIG.save(deps.storage, &config)?;
     CURVE.save(deps.storage, &curve)?;
 
-    Ok(Response::new().add_attribute("action", "instantiate").add_attribute("version", "v0.1"))
+    Ok(Response::new()
+        .add_attribute("action", "instantiate")
+        .add_attribute("version", "v0.1"))
 }
 
 #[entry_point]
@@ -56,13 +64,15 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_json_binary(&query_config(deps)?),
         QueryMsg::CurveState {} => to_json_binary(&query_curve(deps)?),
-        QueryMsg::InitialPrice {} => to_json_binary(&initial_price_response(deps)?),
-        QueryMsg::BuyEstimate { atom_in, min_tokens_out } => {
-            to_json_binary(&buy_estimate(deps, atom_in, min_tokens_out)?)
-        }
-        QueryMsg::SellEstimate { token_in, min_atom_out } => {
-            to_json_binary(&sell_estimate(deps, token_in, min_atom_out)?)
-        }
+        QueryMsg::InitialPrice {} => to_json_binary(&query_initial_price(deps)?),
+        QueryMsg::BuyEstimate {
+            atom_in,
+            min_tokens_out,
+        } => to_json_binary(&buy_estimate(deps, atom_in, min_tokens_out)?),
+        QueryMsg::SellEstimate {
+            token_in,
+            min_atom_out,
+        } => to_json_binary(&sell_estimate(deps, token_in, min_atom_out)?),
     }
 }
 
@@ -89,30 +99,111 @@ fn query_curve(deps: Deps) -> StdResult<CurveStateResponse> {
     })
 }
 
-fn initial_price_response(deps: Deps) -> StdResult<Uint128Response> {
+fn query_initial_price(deps: Deps) -> StdResult<PriceResponse> {
     let curve = CURVE.load(deps.storage)?;
     let price = initial_price(curve.atom_reserve, curve.token_reserve)
-        .map_err(|err| cosmwasm_std::StdError::generic_err(err.to_string()))?;
-    Ok(Uint128Response { value: price })
+        .map_err(|err| StdError::generic_err(err.to_string()))?;
+    Ok(PriceResponse { value: price })
 }
 
-fn buy_estimate(deps: Deps, atom_in: Uint128, minimum: Uint128) -> StdResult<EstimateResponse> {
+fn buy_estimate(
+    deps: Deps,
+    atom_in: Uint128,
+    minimum: Uint128,
+) -> StdResult<EstimateResponse> {
     let curve = CURVE.load(deps.storage)?;
     let output = calculate_buy(atom_in, curve.atom_reserve, curve.token_reserve)
-        .map_err(|err| cosmwasm_std::StdError::generic_err(err.to_string()))?;
+        .map_err(|err| StdError::generic_err(err.to_string()))?;
     enforce_minimum(output, minimum)
-        .map_err(|err| cosmwasm_std::StdError::generic_err(err.to_string()))?;
-    Ok(EstimateResponse { input: atom_in, output, minimum_output: minimum })
+        .map_err(|err| StdError::generic_err(err.to_string()))?;
+    Ok(EstimateResponse {
+        input: atom_in,
+        output,
+        minimum_output: minimum,
+    })
 }
 
-fn sell_estimate(deps: Deps, token_in: Uint128, minimum: Uint128) -> StdResult<EstimateResponse> {
+fn sell_estimate(
+    deps: Deps,
+    token_in: Uint128,
+    minimum: Uint128,
+) -> StdResult<EstimateResponse> {
     let curve = CURVE.load(deps.storage)?;
     let output = calculate_sell(token_in, curve.atom_reserve, curve.token_reserve)
-        .map_err(|err| cosmwasm_std::StdError::generic_err(err.to_string()))?;
+        .map_err(|err| StdError::generic_err(err.to_string()))?;
     enforce_minimum(output, minimum)
-        .map_err(|err| cosmwasm_std::StdError::generic_err(err.to_string()))?;
-    Ok(EstimateResponse { input: token_in, output, minimum_output: minimum })
+        .map_err(|err| StdError::generic_err(err.to_string()))?;
+    Ok(EstimateResponse {
+        input: token_in,
+        output,
+        minimum_output: minimum,
+    })
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq, schemars::JsonSchema)]
-pub struct Uint128Response { pub value: Uint128 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
+    use cosmwasm_std::from_json;
+
+    fn instantiate_msg() -> InstantiateMsg {
+        InstantiateMsg {
+            owner: "cosmos1owner".into(),
+            atom_denom: "uatom".into(),
+            token_name: "CosmoPad Token".into(),
+            token_symbol: "CPT".into(),
+            token_decimals: 6,
+            fee_bps: 250,
+            min_buy_amount: Uint128::new(1),
+            min_sell_amount: Uint128::new(1),
+            virtual_atom_reserve: Uint128::new(1_000),
+            virtual_token_reserve: Uint128::new(1_000),
+        }
+    }
+
+    #[test]
+    fn instantiate_saves_config_and_curve() {
+        let mut deps = mock_dependencies();
+        instantiate(deps.as_mut(), mock_env(), mock_info("creator", &[]), instantiate_msg()).unwrap();
+
+        let config: ConfigResponse = from_json(query(deps.as_ref(), mock_env(), QueryMsg::Config {}).unwrap()).unwrap();
+        assert_eq!(config.atom_denom, "uatom");
+        assert_eq!(config.token_symbol, "CPT");
+
+        let curve: CurveStateResponse = from_json(query(deps.as_ref(), mock_env(), QueryMsg::CurveState {}).unwrap()).unwrap();
+        assert_eq!(curve.atom_reserve, Uint128::new(1_000));
+        assert_eq!(curve.token_reserve, Uint128::new(1_000));
+        assert_eq!(curve.k, "1000000");
+    }
+
+    #[test]
+    fn estimates_are_read_only_and_apply_slippage() {
+        let mut deps = mock_dependencies();
+        instantiate(deps.as_mut(), mock_env(), mock_info("creator", &[]), instantiate_msg()).unwrap();
+
+        let result: EstimateResponse = from_json(query(
+            deps.as_ref(),
+            mock_env(),
+            QueryMsg::BuyEstimate { atom_in: Uint128::new(100), min_tokens_out: Uint128::new(91) },
+        ).unwrap()).unwrap();
+        assert_eq!(result.output, Uint128::new(91));
+
+        let failed = query(
+            deps.as_ref(),
+            mock_env(),
+            QueryMsg::BuyEstimate { atom_in: Uint128::new(100), min_tokens_out: Uint128::new(92) },
+        );
+        assert!(failed.is_err());
+    }
+
+    #[test]
+    fn placeholder_execute_is_disabled() {
+        let result = execute(
+            mock_dependencies().as_mut(),
+            mock_env(),
+            mock_info("user", &[]),
+            ExecuteMsg::Placeholder,
+        );
+        assert!(matches!(result, Err(ContractError::NotImplemented(_))));
+    }
+}

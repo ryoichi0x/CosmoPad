@@ -17,7 +17,6 @@ pub struct InstantiateMsg {
 
 #[cw_serde]
 pub enum ExecuteMsg {
-    // Real buy/sell is intentionally not enabled in V0.1.
     Placeholder,
 }
 
@@ -26,8 +25,14 @@ pub enum QueryMsg {
     Config {},
     CurveState {},
     InitialPrice {},
-    BuyEstimate { atom_in: Uint128, min_tokens_out: Uint128 },
-    SellEstimate { token_in: Uint128, min_atom_out: Uint128 },
+    BuyEstimate {
+        atom_in: Uint128,
+        min_tokens_out: Uint128,
+    },
+    SellEstimate {
+        token_in: Uint128,
+        min_atom_out: Uint128,
+    },
 }
 
 #[cw_serde]
@@ -47,6 +52,11 @@ pub struct CurveStateResponse {
     pub atom_reserve: Uint128,
     pub token_reserve: Uint128,
     pub k: String,
+}
+
+#[cw_serde]
+pub struct PriceResponse {
+    pub value: Uint128,
 }
 
 #[cw_serde]
