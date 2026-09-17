@@ -1,3 +1,6 @@
 [workspace]
-members = ["contracts/cosmopad-launcher"]
+members = [
+    "contracts/cosmopad-launcher",
+    "contracts/cosmopad-token",
+]
 resolver = "2"
