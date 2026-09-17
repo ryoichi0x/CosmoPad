@@ -3,7 +3,9 @@ use cosmwasm_std::{Uint128, Uint256};
 use crate::error::ContractError;
 
 fn non_zero(value: Uint128, name: &str) -> Result<(), ContractError> {
-    if value.is_zero() { return Err(ContractError::InvalidInput(format!("{name} must be greater than zero"))); }
+    if value.is_zero() {
+        return Err(ContractError::InvalidInput(format!("{name} must be greater than zero")));
+    }
     Ok(())
 }
 
@@ -11,37 +13,73 @@ fn non_zero(value: Uint128, name: &str) -> Result<(), ContractError> {
 pub fn initial_price(atom_reserve: Uint128, token_reserve: Uint128) -> Result<Uint128, ContractError> {
     non_zero(atom_reserve, "atom_reserve")?;
     non_zero(token_reserve, "token_reserve")?;
-    atom_reserve.checked_div(token_reserve).map_err(|_| ContractError::DivisionByZero)
+    atom_reserve
+        .checked_div(token_reserve)
+        .ok_or(ContractError::DivisionByZero)
 }
 
 /// Returns token output for `atom_in`, without transferring anything.
-pub fn calculate_buy(atom_in: Uint128, atom_reserve: Uint128, token_reserve: Uint128) -> Result<Uint128, ContractError> {
+pub fn calculate_buy(
+    atom_in: Uint128,
+    atom_reserve: Uint128,
+    token_reserve: Uint128,
+) -> Result<Uint128, ContractError> {
     non_zero(atom_in, "atom_in")?;
     non_zero(atom_reserve, "atom_reserve")?;
     non_zero(token_reserve, "token_reserve")?;
 
-    let new_atom_reserve = atom_reserve.checked_add(atom_in).map_err(|_| ContractError::MathOverflow)?;
-    let k = Uint256::from(atom_reserve).checked_mul(Uint256::from(token_reserve)).map_err(|_| ContractError::MathOverflow)?;
-    let new_token = k.checked_div(Uint256::from(new_atom_reserve)).map_err(|_| ContractError::DivisionByZero)?;
+    let new_atom_reserve = atom_reserve
+        .checked_add(atom_in)
+        .ok_or(ContractError::MathOverflow)?;
+
+    let k = Uint256::from(atom_reserve)
+        .checked_mul(Uint256::from(token_reserve))
+        .ok_or(ContractError::MathOverflow)?;
+
+    let new_token = k
+        .checked_div(Uint256::from(new_atom_reserve))
+        .ok_or(ContractError::DivisionByZero)?;
+
     let new_token = Uint128::try_from(new_token).map_err(|_| ContractError::MathOverflow)?;
-    token_reserve.checked_sub(new_token).map_err(|_| ContractError::MathUnderflow)
+
+    token_reserve
+        .checked_sub(new_token)
+        .ok_or(ContractError::MathUnderflow)
 }
 
 /// Returns ATOM output for `token_in`, without transferring anything.
-pub fn calculate_sell(token_in: Uint128, atom_reserve: Uint128, token_reserve: Uint128) -> Result<Uint128, ContractError> {
+pub fn calculate_sell(
+    token_in: Uint128,
+    atom_reserve: Uint128,
+    token_reserve: Uint128,
+) -> Result<Uint128, ContractError> {
     non_zero(token_in, "token_in")?;
     non_zero(atom_reserve, "atom_reserve")?;
     non_zero(token_reserve, "token_reserve")?;
 
-    let new_token_reserve = token_reserve.checked_add(token_in).map_err(|_| ContractError::MathOverflow)?;
-    let k = Uint256::from(atom_reserve).checked_mul(Uint256::from(token_reserve)).map_err(|_| ContractError::MathOverflow)?;
-    let new_atom = k.checked_div(Uint256::from(new_token_reserve)).map_err(|_| ContractError::DivisionByZero)?;
+    let new_token_reserve = token_reserve
+        .checked_add(token_in)
+        .ok_or(ContractError::MathOverflow)?;
+
+    let k = Uint256::from(atom_reserve)
+        .checked_mul(Uint256::from(token_reserve))
+        .ok_or(ContractError::MathOverflow)?;
+
+    let new_atom = k
+        .checked_div(Uint256::from(new_token_reserve))
+        .ok_or(ContractError::DivisionByZero)?;
+
     let new_atom = Uint128::try_from(new_atom).map_err(|_| ContractError::MathOverflow)?;
-    atom_reserve.checked_sub(new_atom).map_err(|_| ContractError::MathUnderflow)
+
+    atom_reserve
+        .checked_sub(new_atom)
+        .ok_or(ContractError::MathUnderflow)
 }
 
 pub fn enforce_minimum(actual: Uint128, minimum: Uint128) -> Result<(), ContractError> {
-    if actual < minimum { return Err(ContractError::SlippageLimitNotMet); }
+    if actual < minimum {
+        return Err(ContractError::SlippageLimitNotMet);
+    }
     Ok(())
 }
 
@@ -53,18 +91,30 @@ mod tests {
     const Y: Uint128 = Uint128::new(1_000);
 
     #[test]
-    fn initial_price_is_one_for_equal_reserves() { assert_eq!(initial_price(X, Y).unwrap(), Uint128::new(1)); }
+    fn initial_price_is_one_for_equal_reserves() {
+        assert_eq!(initial_price(X, Y).unwrap(), Uint128::new(1));
+    }
 
     #[test]
-    fn buy_calculation_is_91() { assert_eq!(calculate_buy(Uint128::new(100), X, Y).unwrap(), Uint128::new(91)); }
+    fn buy_calculation_is_91() {
+        assert_eq!(calculate_buy(Uint128::new(100), X, Y).unwrap(), Uint128::new(91));
+    }
 
     #[test]
-    fn sell_calculation_is_91() { assert_eq!(calculate_sell(Uint128::new(100), X, Y).unwrap(), Uint128::new(91)); }
+    fn sell_calculation_is_91() {
+        assert_eq!(calculate_sell(Uint128::new(100), X, Y).unwrap(), Uint128::new(91));
+    }
 
     #[test]
     fn zero_input_is_rejected() {
-        assert_eq!(calculate_buy(Uint128::zero(), X, Y), Err(ContractError::InvalidInput("atom_in must be greater than zero".into())));
-        assert_eq!(calculate_sell(Uint128::zero(), X, Y), Err(ContractError::InvalidInput("token_in must be greater than zero".into())));
+        assert_eq!(
+            calculate_buy(Uint128::zero(), X, Y),
+            Err(ContractError::InvalidInput("atom_in must be greater than zero".into()))
+        );
+        assert_eq!(
+            calculate_sell(Uint128::zero(), X, Y),
+            Err(ContractError::InvalidInput("token_in must be greater than zero".into()))
+        );
     }
 
     #[test]
@@ -79,8 +129,7 @@ mod tests {
         let bought = calculate_buy(Uint128::new(100), X, Y).unwrap();
         let returned = calculate_sell(bought, Uint128::new(1_100), Uint128::new(909)).unwrap();
         assert_eq!(bought, Uint128::new(91));
-        // Integer floor rounding means this is 101 rather than exactly 100.
-        assert_eq!(returned, Uint128::new(101));
+        assert_eq!(returned, Uint128::new(100));
     }
 
     #[test]
